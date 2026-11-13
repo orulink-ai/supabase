@@ -1,0 +1,35 @@
+# Replace __ACCOUNT_HOST__, __API_PORT__, __ACME_ROOT__, __CERT_DIR__.
+# Bootstrap HTTP-only first, issue the certificate, then enable the TLS block.
+server {
+    listen 80;
+    server_name __ACCOUNT_HOST__;
+    location ^~ /.well-known/acme-challenge/ {
+        root __ACME_ROOT__;
+        default_type text/plain;
+    }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    server_name __ACCOUNT_HOST__;
+    ssl_certificate __CERT_DIR__/fullchain.pem;
+    ssl_certificate_key __CERT_DIR__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 20m;
+    access_log /www/wwwlogs/watcherobot-account.access.log;
+    error_log /www/wwwlogs/watcherobot-account.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:__API_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+}
