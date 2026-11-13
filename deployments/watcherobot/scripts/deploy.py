@@ -1,6 +1,7 @@
 """Cross-platform, secret-safe commands for the WatcheRobot Supabase stack."""
 
 import argparse
+from datetime import datetime, timezone
 import ipaddress
 import json
 import os
@@ -9,6 +10,7 @@ import subprocess
 import socket
 import sys
 import tempfile
+import uuid
 from urllib.parse import urlsplit
 
 
@@ -184,6 +186,11 @@ def backup_database(command, destination, environment=None):
             temporary.unlink(missing_ok=True)
 
 
+def new_backup_path(directory, region):
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return Path(directory) / ("watcherobot-" + region + "-" + timestamp + "-" + uuid.uuid4().hex[:8] + ".sql")
+
+
 def renew_certificate(acme_home, domain, addresses=None):
     """Renew through direct CA egress, restoring every temporary NAT rule."""
     if addresses is None:
@@ -224,6 +231,7 @@ def main(argv=None):
     parser.add_argument("--region", choices=("cn", "global"), default="cn")
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--backup-file", type=Path)
+    parser.add_argument("--backup-dir", type=Path)
     parser.add_argument("--acme-home", type=Path, default=Path.home() / ".acme.sh")
     args = parser.parse_args(argv)
     try:
@@ -251,9 +259,10 @@ def main(argv=None):
             print("Deployment configuration verified for " + args.region)
             return 0
         if args.action == "backup":
-            if args.backup_file is None:
-                raise ValueError("backup requires --backup-file")
-            backup_database(command, args.backup_file, environment)
+            if (args.backup_file is None) == (args.backup_dir is None):
+                raise ValueError("backup requires exactly one of --backup-file or --backup-dir")
+            destination = args.backup_file or new_backup_path(args.backup_dir, args.region)
+            backup_database(command, destination, environment)
             print("Private database backup completed")
             return 0
         operation = ["up", "-d", "--wait", "--wait-timeout", "300"] if args.action == "up" else ["ps"]

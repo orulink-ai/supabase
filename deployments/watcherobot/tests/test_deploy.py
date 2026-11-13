@@ -169,6 +169,15 @@ class DeploymentTests(unittest.TestCase):
             self.assertFalse(destination.exists())
             self.assertEqual(list(Path(temp).iterdir()), [])
 
+    def test_scheduled_backup_names_do_not_overwrite_previous_runs(self):
+        directory = Path('/private/backups')
+        first = self.module.new_backup_path(directory, 'cn')
+        second = self.module.new_backup_path(directory, 'cn')
+        self.assertEqual(first.parent, directory)
+        self.assertTrue(first.name.startswith('watcherobot-cn-'))
+        self.assertEqual(first.suffix, '.sql')
+        self.assertNotEqual(first, second)
+
     def test_successful_backup_is_private_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp) / 'backup.sql'

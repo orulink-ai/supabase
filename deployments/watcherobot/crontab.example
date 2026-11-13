@@ -1,0 +1,4 @@
+# Root crontab: replace __REGION__ and __BASE_DIR__ before installing.
+# Use a separate lock for each operation; logs remain in the private directory.
+17 3 * * * /usr/bin/flock -n /run/lock/watcherobot-__REGION__-backup /bin/sh __BASE_DIR__/supabase/deployments/watcherobot/scripts/deploy.sh backup --region __REGION__ --env-file __BASE_DIR__/private/__REGION__.env --backup-dir __BASE_DIR__/backups >> __BASE_DIR__/private/backup.log 2>&1
+31 4 * * * /usr/bin/flock -n /run/lock/watcherobot-__REGION__-certificate /bin/sh __BASE_DIR__/supabase/deployments/watcherobot/scripts/deploy.sh renew-certificate --region __REGION__ --env-file __BASE_DIR__/private/__REGION__.env >> __BASE_DIR__/private/certificate-renewal.log 2>&1

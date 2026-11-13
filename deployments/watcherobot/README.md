@@ -73,6 +73,9 @@ sh deployments/watcherobot/scripts/deploy.sh backup --region cn --env-file /opt/
 
 PowerShell 使用相同参数调用 `deploy.ps1`。备份包含数据库角色及 Auth 数据，按秘密管理；文件私有创建，`pg_dumpall` 成功后才发布，拒绝覆盖已有备份。
 正式上线需安排每日备份、独立存储副本与保留策略，并在一次性实例验证恢复；不得把生产恢复命令直接指向当前数据卷。
+`--backup-dir` 可替代 `--backup-file`，每次生成带 UTC 时间及随机后缀的新文件，适合定时任务。
+`crontab.example` 提供每日备份与证书检查的两条任务，替换区域及部署目录后安装到 root crontab；
+按标记追加并保留原任务，不覆盖整份 crontab。不自动删除历史备份或替代独立存储副本。
 上传对象存储的用户文件不在此 SQL 备份范围，首期账户服务不启用用户文件产品功能。
 
 升级前备份环境文件、镜像清单、SQL 和代理配置；固定已验证 Git SHA。容器可退回兼容镜像，数据库不可假定任意降级；涉及破坏性迁移需单独恢复方案。
