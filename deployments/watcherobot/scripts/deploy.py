@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 import ipaddress
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import socket
+import shlex
 import sys
 import tempfile
 import uuid
@@ -57,6 +59,8 @@ def validate_env(env, region):
     for key in ("ENABLE_EMAIL_AUTOCONFIRM", "ENABLE_PHONE_SIGNUP"):
         if env.get(key) != "false":
             raise ValueError(key + " must remain false")
+    if env.get("WATCHEROBOT_DIRECT_EGRESS", "false") not in ("true", "false"):
+        raise ValueError("WATCHEROBOT_DIRECT_EGRESS must be true or false")
     try:
         signing_keys = json.loads(env.get("JWT_KEYS", "[]"))
         verification_keys = json.loads(env.get("JWT_JWKS", "{}"))
@@ -191,6 +195,40 @@ def new_backup_path(directory, region):
     return Path(directory) / ("watcherobot-" + region + "-" + timestamp + "-" + uuid.uuid4().hex[:8] + ".sql")
 
 
+def ensure_direct_egress(region):
+    """Exclude only the owned Compose bridge from an existing transparent proxy."""
+    iptables = ["iptables", "--wait", "10", "-t", "nat"]
+    chain = subprocess.run(iptables + ["-S", "TP_PRE"], capture_output=True, text=True, check=False)
+    if chain.returncode == 1:
+        return False
+    if chain.returncode:
+        raise RuntimeError("Could not inspect the host transparent-proxy chain")
+    project = "watcherobot-" + region
+    result = subprocess.run(["docker", "network", "inspect", project + "_default"], capture_output=True, text=True, check=True)
+    networks = json.loads(result.stdout)
+    if len(networks) != 1:
+        raise ValueError("Expected one dedicated account-service network")
+    network = networks[0]
+    if network.get("Driver") != "bridge" or (network.get("Labels") or {}).get("com.docker.compose.project") != project:
+        raise ValueError("Network does not belong to the requested account deployment")
+    identifier = network.get("Id", "")
+    bridge = "br-" + identifier[:12]
+    if not re.fullmatch(r"[0-9a-f]{64}", identifier) or (network.get("Options") or {}).get("com.docker.network.bridge.name", bridge) != bridge:
+        raise ValueError("Unsupported custom account-service bridge")
+    rule = ["TP_PRE", "-i", bridge, "-m", "comment", "--comment", project + "-direct-egress", "-j", "RETURN"]
+    result = subprocess.run(iptables + ["-C"] + rule, capture_output=True, check=False)
+    if result.returncode == 0:
+        first = next((line for line in chain.stdout.splitlines() if line.startswith("-A TP_PRE ")), "")
+        if shlex.split(first) == ["-A"] + rule:
+            return False
+        # Move only our own matching rule; leave every other rule unchanged.
+        subprocess.run(iptables + ["-D"] + rule, capture_output=True, check=True)
+    elif result.returncode != 1:
+        raise RuntimeError("Could not inspect the account-service egress rule")
+    subprocess.run(iptables + ["-I", rule[0], "1"] + rule[1:], capture_output=True, check=True)
+    return True
+
+
 def renew_certificate(acme_home, domain, addresses=None):
     """Renew through direct CA egress, restoring every temporary NAT rule."""
     if addresses is None:
@@ -227,7 +265,7 @@ def renew_certificate(acme_home, domain, addresses=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("validate", "up", "status", "backup", "renew-certificate"))
+    parser.add_argument("action", choices=("validate", "up", "status", "backup", "renew-certificate", "network-egress"))
     parser.add_argument("--region", choices=("cn", "global"), default="cn")
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--backup-file", type=Path)
@@ -245,6 +283,14 @@ def main(argv=None):
                 raise ValueError("Certificate renewal requires the Linux deployment host's root account")
             renew_certificate(args.acme_home, urlsplit(values["SUPABASE_PUBLIC_URL"]).hostname)
             print("Certificate renewal check completed; temporary egress rules removed")
+            return 0
+        if args.action == "network-egress":
+            if values.get("WATCHEROBOT_DIRECT_EGRESS") != "true":
+                return 0
+            if not sys.platform.startswith("linux") or os.geteuid() != 0:
+                raise ValueError("Network egress configuration requires Linux root")
+            if ensure_direct_egress(args.region):
+                print("Configured direct egress for the dedicated account-service bridge")
             return 0
         environment = dict(os.environ, **values)
         repo = Path(__file__).resolve().parents[3]
@@ -268,6 +314,13 @@ def main(argv=None):
         operation = ["up", "-d", "--wait", "--wait-timeout", "300"] if args.action == "up" else ["ps"]
         if args.action == "up":
             ensure_region(repo, args.region)
+            if values.get("WATCHEROBOT_DIRECT_EGRESS") == "true":
+                if not sys.platform.startswith("linux") or os.geteuid() != 0:
+                    raise ValueError("Direct account-service egress requires Linux root")
+                created = subprocess.run(command + ["create", "--pull", "never"], check=False, env=environment)
+                if created.returncode:
+                    return created.returncode
+                ensure_direct_egress(args.region)
         return subprocess.run(command + operation, check=False, env=environment).returncode
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         # Do not interpolate configuration values or a CalledProcessError.

@@ -17,8 +17,8 @@ server {
     ssl_certificate_key __CERT_DIR__/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     client_max_body_size 20m;
-    access_log /www/wwwlogs/watcherobot-account.access.log;
-    error_log /www/wwwlogs/watcherobot-account.error.log;
+    access_log /www/wwwlogs/__ACCOUNT_HOST__.log;
+    error_log /www/wwwlogs/__ACCOUNT_HOST__.error.log;
 
     location / {
         proxy_pass http://127.0.0.1:__API_PORT__;

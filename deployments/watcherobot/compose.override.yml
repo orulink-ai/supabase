@@ -59,6 +59,11 @@ services:
     logging: *logging
     environment:
       SUPABASE_JWKS: ${JWT_JWKS:?Generate verification keys first}
+    healthcheck:
+      start_period: 90s
+      interval: 10s
+      timeout: 5s
+      retries: 6
   db:
     container_name: watcherobot-${ACCOUNT_REGION}-db
     logging: *logging

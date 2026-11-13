@@ -178,6 +178,52 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(first.suffix, '.sql')
         self.assertNotEqual(first, second)
 
+    def test_direct_egress_is_limited_to_this_projects_bridge(self):
+        network = {'Id':'a'*64, 'Driver':'bridge', 'Labels':{'com.docker.compose.project':'watcherobot-cn'}, 'Options':{}}
+        with patch.object(self.module.subprocess, 'run') as run:
+            run.side_effect = [type('Result', (), {'returncode':0})(), type('Result', (), {'returncode':0,'stdout':json.dumps([network])})(), type('Result', (), {'returncode':1})(), type('Result', (), {'returncode':0})()]
+            self.assertTrue(self.module.ensure_direct_egress('cn'))
+        added = run.call_args_list[-1].args[0]
+        self.assertIn('br-aaaaaaaaaaaa', added)
+        self.assertIn('watcherobot-cn-direct-egress', added)
+        self.assertNotIn('OUTPUT', added)
+
+    def test_direct_egress_rejects_another_projects_network(self):
+        network = {'Id':'a'*64, 'Driver':'bridge', 'Labels':{'com.docker.compose.project':'other'}, 'Options':{}}
+        with patch.object(self.module.subprocess, 'run') as run:
+            run.side_effect = [type('Result', (), {'returncode':0})(), type('Result', (), {'returncode':0,'stdout':json.dumps([network])})()]
+            with self.assertRaises(ValueError): self.module.ensure_direct_egress('cn')
+        self.assertEqual(run.call_count, 2)
+
+    def test_direct_egress_does_not_create_proxy_chains_on_normal_hosts(self):
+        with patch.object(self.module.subprocess, 'run') as run:
+            run.return_value.returncode = 1
+            self.assertFalse(self.module.ensure_direct_egress('cn'))
+        self.assertEqual(run.call_count, 1)
+
+    def test_disabled_direct_egress_action_does_not_touch_host_network(self):
+        with tempfile.TemporaryDirectory() as temp:
+            env_path = Path(temp) / '.env'
+            env_path.write_text('\n'.join(k+'='+v for k,v in self.env().items()), encoding='utf-8')
+            env_path.chmod(0o600)
+            with patch.object(self.module, 'ensure_direct_egress') as ensure, patch.object(self.module.subprocess, 'run') as run:
+                self.assertEqual(self.module.main(['network-egress','--env-file',str(env_path)]),0)
+                ensure.assert_not_called()
+                run.assert_not_called()
+
+    def test_direct_egress_flag_must_be_explicit_boolean(self):
+        env=self.env();env['WATCHEROBOT_DIRECT_EGRESS']='yes'
+        with self.assertRaises(ValueError):self.module.validate_env(env,'cn')
+
+    def test_direct_egress_moves_its_covered_rule_before_interception(self):
+        network = {'Id':'a'*64, 'Driver':'bridge', 'Labels':{'com.docker.compose.project':'watcherobot-cn'}, 'Options':{}}
+        chain = '-N TP_PRE\n-A TP_PRE -j TP_RULE\n-A TP_PRE -i br-aaaaaaaaaaaa -m comment --comment watcherobot-cn-direct-egress -j RETURN\n'
+        with patch.object(self.module.subprocess, 'run') as run:
+            run.side_effect = [type('Result', (), {'returncode':0,'stdout':chain})(), type('Result', (), {'returncode':0,'stdout':json.dumps([network])})(), type('Result', (), {'returncode':0})(), type('Result', (), {'returncode':0})(), type('Result', (), {'returncode':0})()]
+            self.assertTrue(self.module.ensure_direct_egress('cn'))
+        self.assertIn('-D',run.call_args_list[-2].args[0])
+        self.assertIn('-I',run.call_args_list[-1].args[0])
+
     def test_successful_backup_is_private_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp) / 'backup.sql'

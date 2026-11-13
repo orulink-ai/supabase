@@ -74,7 +74,7 @@ sh deployments/watcherobot/scripts/deploy.sh backup --region cn --env-file /opt/
 PowerShell 使用相同参数调用 `deploy.ps1`。备份包含数据库角色及 Auth 数据，按秘密管理；文件私有创建，`pg_dumpall` 成功后才发布，拒绝覆盖已有备份。
 正式上线需安排每日备份、独立存储副本与保留策略，并在一次性实例验证恢复；不得把生产恢复命令直接指向当前数据卷。
 `--backup-dir` 可替代 `--backup-file`，每次生成带 UTC 时间及随机后缀的新文件，适合定时任务。
-`crontab.example` 提供每日备份与证书检查的两条任务，替换区域及部署目录后安装到 root crontab；
+`crontab.example` 提供出口检查、每日备份与证书检查的三条任务，替换区域及部署目录后安装到 root crontab；
 按标记追加并保留原任务，不覆盖整份 crontab。不自动删除历史备份或替代独立存储副本。
 上传对象存储的用户文件不在此 SQL 备份范围，首期账户服务不启用用户文件产品功能。
 
@@ -97,3 +97,43 @@ python -m unittest discover -s deployments/watcherobot/tests -v
 opaque API keys 依赖四项 asymmetric/JWKS 配置，已在 override 显式开启并校验；密钥生成脚本即使修改过上游 base compose，也不应依赖这些未入库改动。部署时保留或还原固定基线的 base 文件，配置来源以此目录为准。
 
 Windows SQL 备份先移除继承权限、仅给文件所有者完全控制，再运行 pg_dumpall；权限设置失败会停止，不写入数据库内容。Linux 文件使用 0600。
+
+## Transparent proxies and deployment verification
+
+`WATCHEROBOT_DIRECT_EGRESS=false` is the default on both platforms. Only Linux
+hosts with an existing `TP_PRE` interception chain should opt in. `up` creates
+the dedicated project network and adds a RETURN for its verified bridge;
+`network-egress` reasserts only that rule. It does not create proxy chains or
+change unrelated interfaces. Schedule the check if the proxy reloads its rules.
+
+Functions has a 90-second cold-start health grace period. Use `up --wait` plus
+API checks to accept deployment. Nginx logs are per-domain;
+`logrotate.conf.example` rotates them daily with seven retained archives.
+
+### Isolated restore prerequisites
+
+Use the exact deployed Postgres image, a fresh disposable data directory and
+`--network none`. Preserve the private db-config volume snapshot required by
+the image configuration. Keep SQL and configuration snapshots (environment,
+db-config, proxy and TLS keys) private, with an independent off-host copy.
+SQL does not include Storage object bytes or all other service volumes.
+
+PostgreSQL 17 requires the original bootstrap superuser name for role grantors.
+Initialize the disposable cluster with `supabase_admin`, then create a separate
+temporary superuser connection and maintenance database. In a private working
+copy of the dump, omit only `DROP ROLE IF EXISTS "supabase_admin";` and
+`CREATE ROLE "supabase_admin";`, asserting exactly one occurrence each. Preserve
+all ALTER ROLE and grant statements; never modify the original backup.
+
+Avoid background workers holding databases open during clean restoration. The
+verified disposable run preloaded `pg_net`, set `pg_net.database_name` to the
+maintenance database and disabled other preloads during restoration. These are
+restore-test settings, not production settings. Run `psql -X -v ON_ERROR_STOP=1`,
+stop on any other error, compare Auth counts and then remove only the disposable
+container and temporary data. See the PostgreSQL GRANT documentation for the
+bootstrap grantor requirement: https://www.postgresql.org/docs/17/sql-grant.html
+
+The first CN instance passed 12 service health checks, strict TLS, protected
+Studio, Auth/REST authorization and an actual registration request. Full SQL
+restoration passed in an isolated instance with Auth data preserved. Recipient
+confirmation remains separate from SMTP acceptance.
