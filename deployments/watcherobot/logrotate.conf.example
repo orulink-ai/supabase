@@ -1,0 +1,10 @@
+/www/wwwlogs/__ACCOUNT_HOST__.log /www/wwwlogs/__ACCOUNT_HOST__.error.log {
+    daily
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su root root
+}

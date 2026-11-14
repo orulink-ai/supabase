@@ -1,0 +1,99 @@
+# Apply after ../../docker/docker-compose.yml with Docker Compose >= 2.24.
+# All published API traffic passes through the host's HTTPS reverse proxy.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  studio:
+    container_name: watcherobot-${ACCOUNT_REGION}-studio
+    logging: *logging
+  api-gw:
+    container_name: watcherobot-${ACCOUNT_REGION}-gateway
+    ports: !override
+      - '127.0.0.1:${WATCHEROBOT_API_PORT:-18200}:8000'
+    logging: *logging
+  auth:
+    container_name: watcherobot-${ACCOUNT_REGION}-auth
+    depends_on:
+      account-email-templates:
+        condition: service_healthy
+    environment:
+      GOTRUE_JWT_KEYS: ${JWT_KEYS:?Generate independent signing keys first}
+      GOTRUE_PASSWORD_MIN_LENGTH: '8'
+      GOTRUE_MAILER_OTP_EXP: '900'
+      GOTRUE_SMTP_MAX_FREQUENCY: '60s'
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: '30'
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://account-email-templates:8000/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://account-email-templates:8000/recovery.html
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: WatcheRobot — Verify your email
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: WatcheRobot — Reset your password
+    logging: *logging
+  rest:
+    container_name: watcherobot-${ACCOUNT_REGION}-rest
+    logging: *logging
+  realtime:
+    container_name: realtime-dev.watcherobot-${ACCOUNT_REGION}-realtime
+    networks:
+      default:
+        aliases:
+          - realtime-dev.supabase-realtime
+    environment:
+      API_JWT_JWKS: ${JWT_JWKS:?Generate verification keys first}
+    logging: *logging
+  storage:
+    container_name: watcherobot-${ACCOUNT_REGION}-storage
+    logging: *logging
+    environment:
+      JWT_JWKS: ${JWT_JWKS:?Generate verification keys first}
+  imgproxy:
+    container_name: watcherobot-${ACCOUNT_REGION}-imgproxy
+    logging: *logging
+  meta:
+    container_name: watcherobot-${ACCOUNT_REGION}-meta
+    logging: *logging
+  functions:
+    container_name: watcherobot-${ACCOUNT_REGION}-functions
+    logging: *logging
+    environment:
+      SUPABASE_JWKS: ${JWT_JWKS:?Generate verification keys first}
+    healthcheck:
+      start_period: 90s
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  db:
+    container_name: watcherobot-${ACCOUNT_REGION}-db
+    logging: *logging
+  supavisor:
+    container_name: watcherobot-${ACCOUNT_REGION}-pooler
+    ports: !reset []
+    logging: *logging
+  account-email-templates:
+    image: python:3.12.14-alpine
+    container_name: watcherobot-${ACCOUNT_REGION}-email-templates
+    restart: unless-stopped
+    user: '65534:65534'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      PYTHONDONTWRITEBYTECODE: '1'
+    working_dir: /templates
+    volumes:
+      - ../deployments/watcherobot/email-templates:/templates:ro,z
+    command: [python, -m, http.server, '8000', --bind, 0.0.0.0]
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/confirmation.html', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging: *logging

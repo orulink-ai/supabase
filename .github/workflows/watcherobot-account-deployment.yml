@@ -1,0 +1,39 @@
+name: WatcheRobot account deployment
+
+on:
+  pull_request:
+    paths:
+      - deployments/watcherobot/**
+      - .github/workflows/watcherobot-account-deployment.yml
+  push:
+    branches: [codex/watcherobot-cn-supabase-20261113]
+    paths:
+      - deployments/watcherobot/**
+      - .github/workflows/watcherobot-account-deployment.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: deployments/watcherobot
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - name: Test deployment safety and backup behavior
+        run: python -m unittest discover -s deployments/watcherobot/tests -v
+      - name: Check Windows entry point
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./deployments/watcherobot/scripts/deploy.ps1 --help
+      - name: Check POSIX entry point
+        if: runner.os != 'Windows'
+        run: sh deployments/watcherobot/scripts/deploy.sh --help
