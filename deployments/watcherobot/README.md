@@ -137,3 +137,9 @@ The first CN instance passed 12 service health checks, strict TLS, protected
 Studio, Auth/REST authorization and an actual registration request. Full SQL
 restoration passed in an isolated instance with Auth data preserved. Recipient
 confirmation remains separate from SMTP acceptance.
+
+Account binding migration and device rollout requirements are documented in
+[ACCOUNT_BINDING.md](ACCOUNT_BINDING.md). Four binding migrations through `202611140002_claim_recovery.sql` have passed
+isolated tests and are deployed independently in CN and GLOBAL after backup and
+restore verification. Android/ESP32/Windows end-to-end verification is recorded in
+[the acceptance report](account-e2e-2026-11-14.zh-CN.md).
