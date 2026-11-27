@@ -42,3 +42,13 @@ Windows 使用 scripts/test-bindings.ps1；macOS/Linux 使用 scripts/test-bindi
 国内与香港均在新备份、隔离恢复及迁移演练后应用四份迁移，最后为 `202611140002_claim_recovery.sql`，保留原 Auth 用户。002 将 stage/state/ACK 的竞争串行化，允许候选中止的签名恢复，并保持已撤销授权不可恢复。001 为已有历史，不改写已部署迁移。
 
 Android／ESP32／Windows 两区真实配网、换 owner、旧凭据拒绝和新凭据连接通过；详见 [端到端验收](account-e2e-2026-11-14.zh-CN.md)。iOS／macOS 原生及两台实体机器人切换仍需补测。credential_history 和硬件 roots 不随临时测试账号清理，避免丢失旧凭据撤销证明。
+
+## 在 Studio 核对当前设备归属
+
+在 Table Editor 的 schema 下拉框中选择 `account_devices_private`，打开 `binding_overview`。视图列出当前 WR 设备标识、账号 UUID 和绑定版本。需要按实物核对时，在 SQL Editor 使用机器人的蓝牙硬件 MAC 查询。例如：
+
+```sql
+select * from account_devices_private.find_binding_by_mac('02:12:34:56:78:9A');
+```
+
+该查询按 ESP32 固件的算法从 MAC 计算已有 WR 标识。匹配时返回一行当前绑定，未匹配时返回零行。iOS 的 CoreBluetooth UUID 和 Wi-Fi 接口地址与这里的蓝牙硬件 MAC 用途不同。视图和函数仅供已有数据库管理权限的运维人员使用。此迁移可独立应用，保留既有绑定和设备端协议。
